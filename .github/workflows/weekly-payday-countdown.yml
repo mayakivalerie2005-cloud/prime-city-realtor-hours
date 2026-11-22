@@ -2,34 +2,48 @@ name: PRIME CITY - Weekly Payday Countdown
 
 on:
   schedule:
-    # Update every day at 8:05 PM WAT
+    # Every day at 8:05 PM WAT
     - cron: '5 19 * * *'
 
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: prime-city-payday
+  cancel-in-progress: false
 
 jobs:
   payday-announcement:
-    name: Update Discord Payday Announcement
+    name: Update Discord Payroll Announcement
     runs-on: ubuntu-latest
 
     steps:
-      - name: Update payday message
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Update permanent payday announcement
         env:
           WEBHOOK_URL: ${{ secrets.PAYROLL_DISCORD_WEBHOOK_URL }}
+
         run: |
           node <<'NODE'
           const https = require('https');
+          const fs = require('fs');
+          const path = require('path');
 
           const webhook = process.env.WEBHOOK_URL;
 
           if (!webhook) {
-            throw new Error('PAYROLL_DISCORD_WEBHOOK_URL is missing.');
+            throw new Error('Discord webhook secret is missing.');
           }
 
-          function send(url, method, body) {
+          const idFile = 'state/payday-message-id.txt';
+
+          function request(url, method, body) {
             return new Promise((resolve, reject) => {
               const u = new URL(url);
               const data = JSON.stringify(body);
@@ -41,17 +55,22 @@ jobs:
                 headers: {
                   'Content-Type': 'application/json',
                   'Content-Length': Buffer.byteLength(data),
-                  'User-Agent': 'PRIME-CITY-Payday-Bot'
+                  'User-Agent': 'PRIME-CITY-Payroll'
                 }
               }, res => {
                 let response = '';
+
                 res.on('data', chunk => response += chunk);
+
                 res.on('end', () => {
                   if (res.statusCode < 200 || res.statusCode >= 300) {
-                    reject(new Error(`Discord HTTP ${res.statusCode}: ${response}`));
-                  } else {
-                    resolve(response);
+                    reject(new Error(
+                      `Discord HTTP ${res.statusCode}: ${response}`
+                    ));
+                    return;
                   }
+
+                  resolve(response ? JSON.parse(response) : {});
                 });
               });
 
@@ -83,59 +102,142 @@ jobs:
             ));
 
             const days = (7 - date.getUTCDay()) % 7;
+
             date.setUTCDate(date.getUTCDate() + days);
 
             // 8 PM WAT = 19:00 UTC
-            const target = Date.UTC(
+            let target = Date.UTC(
               date.getUTCFullYear(),
               date.getUTCMonth(),
               date.getUTCDate(),
               19, 0, 0
             );
 
-            return Math.floor(
-              (target <= now.getTime() ? target + 7 * 86400000 : target) / 1000
-            );
+            // If payday has passed, move to next Sunday.
+            if (target <= now.getTime()) {
+              target += 7 * 86400000;
+            }
+
+            return Math.floor(target / 1000);
           }
 
           async function main() {
+
             const payment = getNextSunday();
 
             const portal =
               'https://mayakivalerie2005-cloud.github.io/prime-city-realtor-hours/prime-city-agent-payroll/';
 
             const payload = {
-              username: 'PRIME CITY | PAYROLL',
+              username: 'PRIME CITY | FINANCE',
+
               embeds: [{
                 title: '👑 PRIME CITY REAL ESTATE',
+
                 description:
-                  '## 💰 WEEKLY AGENT PAYDAY\n\n' +
-                  '**PAYMENT FREQUENCY**\nEvery Sunday\n\n' +
-                  '**NEXT PAYMENT DATE**\n' +
-                  `<t:${payment}:F>\n\n` +
-                  '**PAYMENT TIME**\n' +
-                  `<t:${payment}:t> — displayed in your local timezone\n\n` +
-                  '**COUNTDOWN TO PAYDAY**\n' +
+                  '### WEEKLY AGENT PAYROLL\n' +
+                  '━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+
+                  'Your weekly commission payment is scheduled ' +
+                  'according to the official PRIME CITY payroll calendar.\n\n' +
+
+                  '**💰 PAYMENT SCHEDULE**\n' +
+                  'Payment frequency: Every Sunday\n' +
+                  'Payment time: 8:00 PM WAT\n\n' +
+
+                  '**📅 NEXT PAYDAY**\n' +
+                  `<t:${payment}:D>\n\n` +
+
+                  '**⏳ COUNTDOWN TO PAYMENT**\n' +
                   `<t:${payment}:R>\n\n` +
+
+                  '━━━━━━━━━━━━━━━━━━━━━━\n' +
+
+                  '**📂 AGENT PAYROLL PORTAL**\n' +
+                  'Access your payroll information and payment records below.\n\n' +
+
                   `🔗 [OPEN PAYROLL PORTAL](${portal})`,
+
                 color: 14269269,
+
                 footer: {
-                  text: 'PRIME CITY REAL ESTATE • Weekly Payroll'
+                  text: 'PRIME CITY REAL ESTATE • FINANCE & ADMINISTRATION'
                 },
+
                 timestamp: new Date().toISOString()
               }]
             };
 
-            const base = webhook.replace(/\/$/, '');
-            const postUrl = base +
-              (base.includes('?') ? '&' : '?') + 'wait=true';
+            const base = new URL(webhook);
 
-            const result = await send(postUrl, 'POST', payload);
-            console.log('Payday announcement posted:', result);
+            let messageId = null;
+
+            if (fs.existsSync(idFile)) {
+              messageId = fs.readFileSync(idFile, 'utf8').trim();
+            }
+
+            let result;
+
+            if (messageId) {
+
+              console.log('Updating existing payroll announcement...');
+
+              const editUrl = new URL(base.toString());
+
+              editUrl.pathname =
+                editUrl.pathname.replace(/\/$/, '') +
+                '/messages/' + messageId;
+
+              result = await request(
+                editUrl.toString(),
+                'PATCH',
+                payload
+              );
+
+            } else {
+
+              console.log('Creating first payroll announcement...');
+
+              base.searchParams.set('wait', 'true');
+
+              result = await request(
+                base.toString(),
+                'POST',
+                payload
+              );
+
+              if (!result.id) {
+                throw new Error('Discord did not return a message ID.');
+              }
+
+              fs.mkdirSync(path.dirname(idFile), {
+                recursive: true
+              });
+
+              fs.writeFileSync(idFile, result.id);
+
+              console.log('Permanent message ID saved:', result.id);
+            }
+
+            console.log('Payroll announcement updated successfully.');
           }
 
           main().catch(error => {
             console.error(error);
             process.exit(1);
           });
+
           NODE
+
+      - name: Save announcement ID
+        run: |
+          if [[ -n "$(git status --porcelain state/payday-message-id.txt)" ]]; then
+            git config user.name "PRIME CITY Payroll Bot"
+            git config user.email "payroll-bot@users.noreply.github.com"
+
+            git add state/payday-message-id.txt
+
+            git commit -m "Save permanent payroll announcement ID"
+
+            git push
+          fi
