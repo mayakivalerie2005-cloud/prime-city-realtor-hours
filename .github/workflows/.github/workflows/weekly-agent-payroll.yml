@@ -1,0 +1,46 @@
+
+name: PRIME CITY - Weekly Agent Payroll
+
+on:
+  schedule:
+    # Every Sunday at 8 PM WAT
+    - cron: '0 19 * * 0'
+
+  # Allow manual testing from GitHub Actions
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prime-city-weekly-payroll
+  cancel-in-progress: false
+
+jobs:
+  weekly-payroll:
+    name: Calculate Agent Commissions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get repository files
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run weekly payroll calculator
+        run: node prime-city-agent-payroll/scripts/weekly-payroll.mjs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.PAYROLL_DISCORD_WEBHOOK_URL }}
+
+      - name: Confirm payroll completion
+        if: success()
+        run: echo "PRIME CITY weekly payroll completed successfully."
+
+      - name: Report payroll failure
+        if: failure()
+        run: echo "WARNING: PRIME CITY payroll workflow failed. Check the logs."
