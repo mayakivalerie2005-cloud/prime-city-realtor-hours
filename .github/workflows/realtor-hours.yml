@@ -1,6 +1,7 @@
 name: PRIME CITY Realtor Hours
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 9 * * 1-6'
       timezone: Europe/London
