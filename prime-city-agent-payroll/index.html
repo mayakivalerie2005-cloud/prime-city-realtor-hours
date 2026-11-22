@@ -22,7 +22,7 @@
 <script>
 const SUPABASE_URL='https://ujpbjioxnrdnohzlltnt.supabase.co';
 const SUPABASE_ANON_KEY='sb_publishable_UyPtDgwhBi4JjKtvyrF4lQ_V6I21Hu9';
-const RATE=0.5;let db=null,agents=[],sales=[],payroll=[],myProfile=null;
+const RATE=0.05;let db=null,agents=[],sales=[],payroll=[],myProfile=null;
 const $=id=>document.getElementById(id);const money=n=>new Intl.NumberFormat(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2}).format(Number(n||0));const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function watDate(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Lagos',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())}
 function weekBounds(){const today=watDate(),d=new Date(today+'T12:00:00Z'),day=(d.getUTCDay()+6)%7;d.setUTCDate(d.getUTCDate()-day);const start=d.toISOString().slice(0,10);d.setUTCDate(d.getUTCDate()+6);return {start,end:d.toISOString().slice(0,10)}}
