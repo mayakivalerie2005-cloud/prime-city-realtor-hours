@@ -5,39 +5,48 @@ on:
   workflow_dispatch:
 
   schedule:
-    # Monday to Saturday opening: 09:00 WAT
     - cron: '0 9 * * 1-6'
       timezone: Africa/Lagos
-
-    # Sunday emergency opening: 13:00 WAT
     - cron: '0 13 * * 0'
       timezone: Africa/Lagos
-
-    # Monday to Saturday closing: 18:00 WAT
     - cron: '0 18 * * 1-6'
       timezone: Africa/Lagos
-
-    # Sunday emergency closing: 15:00 WAT
     - cron: '0 15 * * 0'
       timezone: Africa/Lagos
 
 permissions:
   contents: read
+  actions: write
+
+concurrency:
+  group: prime-city-realtor-hours
+  cancel-in-progress: false
 
 jobs:
   post-hours:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Post PRIME CITY business hours
+      - name: Create or update business-hours announcement
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
           node <<'NODE'
           const tz = "Africa/Lagos";
+          const variableName = "PRIME_CITY_HOURS_MESSAGE_ID";
           const now = new Date();
           const schedule = process.env.GITHUB_EVENT_SCHEDULE || "";
+
+          const webhook = process.env.DISCORD_WEBHOOK_URL;
+          const token = process.env.GITHUB_TOKEN;
+          const repo = process.env.GITHUB_REPOSITORY;
+
+          if (!webhook || !token || !repo) {
+            throw new Error("A required webhook or GitHub environment value is missing.");
+          }
 
           function getParts(date) {
             return Object.fromEntries(
@@ -74,12 +83,10 @@ jobs:
           }
 
           const p = getParts(now);
-
           const year = Number(p.year);
           const month = Number(p.month);
           const day = Number(p.day);
           const weekday = p.weekday;
-
           const isSunday = weekday === "Sun";
 
           const openingHour = isSunday ? 13 : 9;
@@ -88,18 +95,21 @@ jobs:
           const currentMinutes =
             Number(p.hour) * 60 + Number(p.minute);
 
-          const openingMinutes = openingHour * 60;
-          const closingMinutes = closingHour * 60;
+          let isOpen =
+            currentMinutes >= openingHour * 60 &&
+            currentMinutes < closingHour * 60;
 
-          const openStamp = Math.floor(
-            localToUTC(year, month, day, openingHour, 0).getTime() / 1000
-          );
+          const openingSchedule = isSunday
+            ? "0 13 * * 0"
+            : "0 9 * * 1-6";
 
-          const closeStamp = Math.floor(
-            localToUTC(year, month, day, closingHour, 0).getTime() / 1000
-          );
+          const closingSchedule = isSunday
+            ? "0 15 * * 0"
+            : "0 18 * * 1-6";
 
-          // Make the weekday and date very visible.
+          if (schedule === openingSchedule) isOpen = true;
+          if (schedule === closingSchedule) isOpen = false;
+
           const dayLabel = new Intl.DateTimeFormat("en-GB", {
             timeZone: tz,
             weekday: "long"
@@ -112,64 +122,43 @@ jobs:
             year: "numeric"
           }).format(now).toUpperCase();
 
-          const openingSchedule = isSunday
-            ? "0 13 * * 0"
-            : "0 9 * * 1-6";
+          const openStamp = Math.floor(
+            localToUTC(year, month, day, openingHour, 0).getTime() / 1000
+          );
 
-          const closingSchedule = isSunday
-            ? "0 15 * * 0"
-            : "0 18 * * 1-6";
+          const closeStamp = Math.floor(
+            localToUTC(year, month, day, closingHour, 0).getTime() / 1000
+          );
 
-          let isOpen =
-            currentMinutes >= openingMinutes &&
-            currentMinutes < closingMinutes;
-
-          // Respect scheduled opening and closing announcements.
-          if (schedule === openingSchedule) {
-            isOpen = true;
-          }
-
-          if (schedule === closingSchedule) {
-            isOpen = false;
-          }
-
-          // Calculate the next opening if the office is closed.
+          // Find the next opening time if the office is closed.
           let nextOpenStamp = openStamp;
 
-          if (!isOpen && currentMinutes >= closingMinutes) {
-            for (let offset = 1; offset <= 7; offset++) {
-              const nextDate = new Date(
+          if (!isOpen) {
+            for (let offset = 0; offset <= 7; offset++) {
+              const candidate = new Date(
                 Date.UTC(year, month - 1, day + offset)
               );
 
-              const nextYear = nextDate.getUTCFullYear();
-              const nextMonth = nextDate.getUTCMonth() + 1;
-              const nextDay = nextDate.getUTCDate();
+              const cy = candidate.getUTCFullYear();
+              const cm = candidate.getUTCMonth() + 1;
+              const cd = candidate.getUTCDate();
 
-              const nextWeekday = new Intl.DateTimeFormat("en-GB", {
-                timeZone: tz,
-                weekday: "short"
-              }).format(
-                localToUTC(nextYear, nextMonth, nextDay, 12, 0)
+              const candidateNoon = localToUTC(cy, cm, cd, 12, 0);
+              const candidateDay = getParts(candidateNoon).weekday;
+              const candidateHour = candidateDay === "Sun" ? 13 : 9;
+
+              const candidateOpening = localToUTC(
+                cy, cm, cd, candidateHour, 0
               );
 
-              const nextOpeningHour = nextWeekday === "Sun" ? 13 : 9;
-
-              nextOpenStamp = Math.floor(
-                localToUTC(
-                  nextYear,
-                  nextMonth,
-                  nextDay,
-                  nextOpeningHour,
-                  0
-                ).getTime() / 1000
-              );
-
-              break;
+              if (candidateOpening.getTime() > now.getTime()) {
+                nextOpenStamp = Math.floor(
+                  candidateOpening.getTime() / 1000
+                );
+                break;
+              }
             }
           }
-
-          const title = `🏡 PRIME CITY REAL ESTATE | ${dayLabel}`;
 
           const description = isOpen
             ? isSunday
@@ -219,47 +208,123 @@ jobs:
           }
 
           const embed = {
-            title: title,
-            description: description,
+            title: `🏡 PRIME CITY REAL ESTATE | ${dayLabel}`,
+            description,
             color: isOpen ? 0xB22222 : 0x555555,
-            fields: fields,
+            fields,
             footer: {
               text: "PRIME CITY REAL ESTATE • Official Business Hours • WAT"
             },
             timestamp: now.toISOString()
           };
 
-          async function sendAnnouncement() {
-            if (!process.env.DISCORD_WEBHOOK_URL) {
-              throw new Error("DISCORD_WEBHOOK_URL secret is missing.");
+          const githubHeaders = {
+            "Accept": "application/vnd.github+json",
+            "Authorization": `Bearer ${token}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json"
+          };
+
+          const variableUrl =
+            `https://api.github.com/repos/${repo}/actions/variables/${variableName}`;
+
+          async function getMessageId() {
+            const response = await fetch(variableUrl, {
+              headers: githubHeaders
+            });
+
+            if (response.status === 404) return null;
+
+            if (!response.ok) {
+              throw new Error("Could not read GitHub message ID variable: " + response.status);
             }
 
+            const data = await response.json();
+            return data.value;
+          }
+
+          async function saveMessageId(messageId, exists) {
+            const url = exists
+              ? variableUrl
+              : `https://api.github.com/repos/${repo}/actions/variables`;
+
+            const response = await fetch(url, {
+              method: exists ? "PATCH" : "POST",
+              headers: githubHeaders,
+              body: JSON.stringify({
+                name: variableName,
+                value: messageId
+              })
+            });
+
+            if (!response.ok) {
+              throw new Error("Could not save GitHub message ID: " + response.status);
+            }
+          }
+
+          async function createMessage() {
+            const response = await fetch(`${webhook}?wait=true`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                embeds: [embed],
+                allowed_mentions: { parse: [] }
+              })
+            });
+
+            if (!response.ok) {
+              throw new Error("Discord message creation failed: " + response.status);
+            }
+
+            return await response.json();
+          }
+
+          async function editMessage(messageId) {
             const response = await fetch(
-              process.env.DISCORD_WEBHOOK_URL,
+              `${webhook}/messages/${messageId}`,
               {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json"
-                },
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   embeds: [embed],
-                  allowed_mentions: {
-                    parse: []
-                  }
+                  allowed_mentions: { parse: [] }
                 })
               }
             );
 
-            if (!response.ok) {
-              throw new Error(
-                "Discord webhook failed: " + response.status
-              );
-            }
-
-            console.log("PRIME CITY announcement posted successfully.");
+            return response;
           }
 
-          sendAnnouncement().catch(error => {
+          async function main() {
+            const messageId = await getMessageId();
+
+            if (messageId) {
+              const response = await editMessage(messageId);
+
+              if (response.ok) {
+                console.log("Existing PRIME CITY announcement updated.");
+                return;
+              }
+
+              if (response.status !== 404) {
+                throw new Error("Discord message edit failed: " + response.status);
+              }
+
+              console.log("Saved message no longer exists. Creating a replacement.");
+            }
+
+            const message = await createMessage();
+
+            if (!message.id) {
+              throw new Error("Discord did not return a message ID.");
+            }
+
+            await saveMessageId(message.id, Boolean(messageId));
+
+            console.log("PRIME CITY announcement created and its ID saved.");
+          }
+
+          main().catch(error => {
             console.error(error);
             process.exit(1);
           });
