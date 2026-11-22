@@ -5,20 +5,8 @@ on:
   workflow_dispatch:
 
   schedule:
-    # Monday to Saturday opening: 09:00 WAT
-    - cron: '0 9 * * 1-6'
-      timezone: Africa/Lagos
-
-    # Sunday emergency opening: 13:00 WAT
-    - cron: '0 13 * * 0'
-      timezone: Africa/Lagos
-
-    # Monday to Saturday closing: 18:00 WAT
-    - cron: '0 18 * * 1-6'
-      timezone: Africa/Lagos
-
-    # Sunday emergency closing: 15:00 WAT
-    - cron: '0 15 * * 0'
+    # Check business status every 5 minutes, Lagos time
+    - cron: '*/5 * * * *'
       timezone: Africa/Lagos
 
 permissions:
@@ -31,26 +19,23 @@ concurrency:
 jobs:
   post-hours:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Get repository files
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create or update business-hours announcement
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
           node <<'NODE'
           const fs = require("fs");
-          const path = ".github/prime-city-message-id.txt";
 
           const tz = "Africa/Lagos";
           const now = new Date();
-          const schedule = process.env.GITHUB_EVENT_SCHEDULE || "";
           const webhook = process.env.DISCORD_WEBHOOK_URL;
+          const idFile = ".github/prime-city-message-id.txt";
 
           if (!webhook) {
             throw new Error("DISCORD_WEBHOOK_URL secret is missing.");
@@ -77,6 +62,7 @@ jobs:
 
             for (let i = 0; i < 3; i++) {
               const p = getParts(result);
+
               const actual = Date.UTC(
                 Number(p.year),
                 Number(p.month) - 1,
@@ -92,10 +78,13 @@ jobs:
           }
 
           const p = getParts(now);
+
           const year = Number(p.year);
           const month = Number(p.month);
           const day = Number(p.day);
-          const isSunday = p.weekday === "Sun";
+          const weekday = p.weekday;
+
+          const isSunday = weekday === "Sun";
 
           const openingHour = isSunday ? 13 : 9;
           const closingHour = isSunday ? 15 : 18;
@@ -103,20 +92,14 @@ jobs:
           const currentMinutes =
             Number(p.hour) * 60 + Number(p.minute);
 
-          let isOpen =
-            currentMinutes >= openingHour * 60 &&
-            currentMinutes < closingHour * 60;
+          const openingMinutes = openingHour * 60;
+          const closingMinutes = closingHour * 60;
 
-          const openingSchedule = isSunday
-            ? "0 13 * * 0"
-            : "0 9 * * 1-6";
+          const isOpen =
+            currentMinutes >= openingMinutes &&
+            currentMinutes < closingMinutes;
 
-          const closingSchedule = isSunday
-            ? "0 15 * * 0"
-            : "0 18 * * 1-6";
-
-          if (schedule === openingSchedule) isOpen = true;
-          if (schedule === closingSchedule) isOpen = false;
+          const isEmergency = isSunday && isOpen;
 
           const dayLabel = new Intl.DateTimeFormat("en-GB", {
             timeZone: tz,
@@ -130,33 +113,33 @@ jobs:
             year: "numeric"
           }).format(now).toUpperCase();
 
-          const openStamp = Math.floor(
-            localToUTC(year, month, day, openingHour, 0).getTime() / 1000
-          );
-
           const closeStamp = Math.floor(
-            localToUTC(year, month, day, closingHour, 0).getTime() / 1000
+            localToUTC(
+              year, month, day, closingHour, 0
+            ).getTime() / 1000
           );
 
-          // Find the next scheduled opening.
-          let nextOpenStamp = openStamp;
+          // Find the next opening time when closed.
+          let nextOpenStamp = null;
 
           if (!isOpen) {
             for (let offset = 0; offset <= 7; offset++) {
-              const candidate = new Date(
+              const candidateDate = new Date(
                 Date.UTC(year, month - 1, day + offset)
               );
 
-              const cy = candidate.getUTCFullYear();
-              const cm = candidate.getUTCMonth() + 1;
-              const cd = candidate.getUTCDate();
+              const cy = candidateDate.getUTCFullYear();
+              const cm = candidateDate.getUTCMonth() + 1;
+              const cd = candidateDate.getUTCDate();
 
               const noon = localToUTC(cy, cm, cd, 12, 0);
-              const candidateDay = getParts(noon).weekday;
-              const candidateHour = candidateDay === "Sun" ? 13 : 9;
+              const candidateWeekday = getParts(noon).weekday;
+
+              const nextOpeningHour =
+                candidateWeekday === "Sun" ? 13 : 9;
 
               const candidateOpening = localToUTC(
-                cy, cm, cd, candidateHour, 0
+                cy, cm, cd, nextOpeningHour, 0
               );
 
               if (candidateOpening.getTime() > now.getTime()) {
@@ -168,11 +151,26 @@ jobs:
             }
           }
 
-          const description = isOpen
-            ? isSunday
-              ? "🟠 **EMERGENCY SERVICES OPEN**\n\nOur emergency property service is currently available."
-              : "🟢 **OFFICE OPEN**\n\nWelcome to PRIME CITY REAL ESTATE. Our team is ready to assist you."
-            : "🔴 **OFFICE CLOSED**\n\nThank you for choosing PRIME CITY REAL ESTATE. We look forward to assisting you.";
+          let status;
+          let statusDescription;
+          let colour;
+
+          if (isEmergency) {
+            status = "🟠 EMERGENCY SERVICES OPEN";
+            statusDescription =
+              "Urgent property-related matters may be reviewed, subject to staff availability.";
+            colour = 0xF39C12;
+          } else if (isOpen) {
+            status = "🟢 OFFICE OPEN";
+            statusDescription =
+              "Our real estate agents are available to assist you.";
+            colour = 0x2ECC71;
+          } else {
+            status = "🔴 OFFICE CLOSED";
+            statusDescription =
+              "Regular property services are currently unavailable.";
+            colour = 0xB22222;
+          }
 
           const fields = [
             {
@@ -186,28 +184,26 @@ jobs:
               inline: true
             },
             {
-              name: "🕒 BUSINESS HOURS",
+              name: "⏰ BUSINESS STATUS",
+              value: `**${status}**\n${statusDescription}`,
+              inline: false
+            },
+            {
+              name: "🕒 TODAY'S HOURS",
               value: isSunday
                 ? "1:00 PM – 3:00 PM WAT\n**Emergency Only**"
-                : "9:00 AM – 6:00 PM WAT\n**Monday – Saturday**",
+                : "9:00 AM – 6:00 PM WAT",
               inline: false
             }
           ];
 
           if (isOpen) {
-            fields.push(
-              {
-                name: "⏳ TIME UNTIL CLOSING",
-                value: `<t:${closeStamp}:R>`,
-                inline: true
-              },
-              {
-                name: "🔔 CLOSING TIME",
-                value: `<t:${closeStamp}:t>`,
-                inline: true
-              }
-            );
-          } else {
+            fields.push({
+              name: "⏳ TIME UNTIL CLOSING",
+              value: `<t:${closeStamp}:R>\nClosing at <t:${closeStamp}:t>`,
+              inline: false
+            });
+          } else if (nextOpenStamp) {
             fields.push({
               name: "⏳ NEXT OPENING",
               value: `<t:${nextOpenStamp}:F>\n<t:${nextOpenStamp}:R>`,
@@ -216,12 +212,14 @@ jobs:
           }
 
           const embed = {
-            title: `🏡 PRIME CITY REAL ESTATE | ${dayLabel}`,
-            description,
-            color: isOpen ? 0xB22222 : 0x555555,
+            title: `👑 PRIME CITY REAL ESTATE | ${dayLabel}`,
+            description:
+              "🏡 **LIVE BUSINESS HOURS UPDATE**\n\n" +
+              "Your PRIME CITY real estate team is here to assist with property purchases, sales, viewings and enquiries.",
+            color: colour,
             fields,
             footer: {
-              text: "PRIME CITY REAL ESTATE • OFFICIAL BUSINESS HOURS • WAT"
+              text: "PRIME CITY REAL ESTATE • OFFICIAL STATUS • WAT"
             },
             timestamp: now.toISOString()
           };
@@ -240,8 +238,8 @@ jobs:
 
             if (!response.ok) {
               throw new Error(
-                "Discord message creation failed: " + response.status +
-                " " + await response.text()
+                "Discord creation failed: " +
+                response.status + " " + await response.text()
               );
             }
 
@@ -249,7 +247,7 @@ jobs:
           }
 
           async function editMessage(messageId) {
-            const response = await fetch(
+            return await fetch(
               `${webhook}/messages/${messageId}`,
               {
                 method: "PATCH",
@@ -262,8 +260,6 @@ jobs:
                 })
               }
             );
-
-            return response;
           }
 
           async function main() {
@@ -271,8 +267,8 @@ jobs:
 
             let messageId = null;
 
-            if (fs.existsSync(path)) {
-              messageId = fs.readFileSync(path, "utf8").trim();
+            if (fs.existsSync(idFile)) {
+              messageId = fs.readFileSync(idFile, "utf8").trim();
             }
 
             if (messageId) {
@@ -285,12 +281,12 @@ jobs:
 
               if (response.status !== 404) {
                 throw new Error(
-                  "Discord message edit failed: " + response.status +
-                  " " + await response.text()
+                  "Discord edit failed: " +
+                  response.status + " " + await response.text()
                 );
               }
 
-              console.log("Previous message not found. Creating a new one.");
+              console.log("Old message not found. Creating replacement.");
             }
 
             const message = await createMessage();
@@ -299,10 +295,10 @@ jobs:
               throw new Error("Discord did not return a message ID.");
             }
 
-            fs.writeFileSync(path, message.id + "\n");
+            fs.writeFileSync(idFile, message.id + "\n");
 
             console.log("New announcement created.");
-            console.log("Discord message ID saved for future updates.");
+            console.log("New message ID saved.");
           }
 
           main().catch(error => {
@@ -311,7 +307,7 @@ jobs:
           });
           NODE
 
-      - name: Save announcement ID to repository
+      - name: Save new announcement ID
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -322,5 +318,5 @@ jobs:
             git commit -m "Save PRIME CITY announcement message ID"
             git push
           else
-            echo "Announcement ID has not changed."
+            echo "Message ID already saved."
           fi
