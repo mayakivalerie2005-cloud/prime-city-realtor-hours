@@ -1,0 +1,141 @@
+name: PRIME CITY - Weekly Payday Countdown
+
+on:
+  schedule:
+    # Update every day at 8:05 PM WAT
+    - cron: '5 19 * * *'
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  payday-announcement:
+    name: Update Discord Payday Announcement
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Update payday message
+        env:
+          WEBHOOK_URL: ${{ secrets.PAYROLL_DISCORD_WEBHOOK_URL }}
+        run: |
+          node <<'NODE'
+          const https = require('https');
+
+          const webhook = process.env.WEBHOOK_URL;
+
+          if (!webhook) {
+            throw new Error('PAYROLL_DISCORD_WEBHOOK_URL is missing.');
+          }
+
+          function send(url, method, body) {
+            return new Promise((resolve, reject) => {
+              const u = new URL(url);
+              const data = JSON.stringify(body);
+
+              const req = https.request({
+                hostname: u.hostname,
+                path: u.pathname + u.search,
+                method,
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(data),
+                  'User-Agent': 'PRIME-CITY-Payday-Bot'
+                }
+              }, res => {
+                let response = '';
+                res.on('data', chunk => response += chunk);
+                res.on('end', () => {
+                  if (res.statusCode < 200 || res.statusCode >= 300) {
+                    reject(new Error(`Discord HTTP ${res.statusCode}: ${response}`));
+                  } else {
+                    resolve(response);
+                  }
+                });
+              });
+
+              req.on('error', reject);
+              req.write(data);
+              req.end();
+            });
+          }
+
+          function getNextSunday() {
+            const now = new Date();
+
+            const formatter = new Intl.DateTimeFormat('en-GB', {
+              timeZone: 'Africa/Lagos',
+              weekday: 'short',
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit'
+            });
+
+            const parts = Object.fromEntries(
+              formatter.formatToParts(now).map(p => [p.type, p.value])
+            );
+
+            const date = new Date(Date.UTC(
+              Number(parts.year),
+              Number(parts.month) - 1,
+              Number(parts.day)
+            ));
+
+            const days = (7 - date.getUTCDay()) % 7;
+            date.setUTCDate(date.getUTCDate() + days);
+
+            // 8 PM WAT = 19:00 UTC
+            const target = Date.UTC(
+              date.getUTCFullYear(),
+              date.getUTCMonth(),
+              date.getUTCDate(),
+              19, 0, 0
+            );
+
+            return Math.floor(
+              (target <= now.getTime() ? target + 7 * 86400000 : target) / 1000
+            );
+          }
+
+          async function main() {
+            const payment = getNextSunday();
+
+            const portal =
+              'https://mayakivalerie2005-cloud.github.io/prime-city-realtor-hours/prime-city-agent-payroll/';
+
+            const payload = {
+              username: 'PRIME CITY | PAYROLL',
+              embeds: [{
+                title: '👑 PRIME CITY REAL ESTATE',
+                description:
+                  '## 💰 WEEKLY AGENT PAYDAY\n\n' +
+                  '**PAYMENT FREQUENCY**\nEvery Sunday\n\n' +
+                  '**NEXT PAYMENT DATE**\n' +
+                  `<t:${payment}:F>\n\n` +
+                  '**PAYMENT TIME**\n' +
+                  `<t:${payment}:t> — displayed in your local timezone\n\n` +
+                  '**COUNTDOWN TO PAYDAY**\n' +
+                  `<t:${payment}:R>\n\n` +
+                  `🔗 [OPEN PAYROLL PORTAL](${portal})`,
+                color: 14269269,
+                footer: {
+                  text: 'PRIME CITY REAL ESTATE • Weekly Payroll'
+                },
+                timestamp: new Date().toISOString()
+              }]
+            };
+
+            const base = webhook.replace(/\/$/, '');
+            const postUrl = base +
+              (base.includes('?') ? '&' : '?') + 'wait=true';
+
+            const result = await send(postUrl, 'POST', payload);
+            console.log('Payday announcement posted:', result);
+          }
+
+          main().catch(error => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
