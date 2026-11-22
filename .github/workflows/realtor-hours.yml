@@ -1,12 +1,24 @@
+
 name: PRIME CITY Realtor Hours
 
 on:
   workflow_dispatch:
   schedule:
+    # Opening: Monday to Saturday, 09:00 WAT
     - cron: '0 9 * * 1-6'
-      timezone: Europe/London
+      timezone: Africa/Lagos
+
+    # Sunday emergency opening: 13:00 WAT
     - cron: '0 13 * * 0'
-      timezone: Europe/London
+      timezone: Africa/Lagos
+
+    # Closing: Monday to Saturday, 18:00 WAT
+    - cron: '0 18 * * 1-6'
+      timezone: Africa/Lagos
+
+    # Sunday emergency closing: 15:00 WAT
+    - cron: '0 15 * * 0'
+      timezone: Africa/Lagos
 
 permissions:
   contents: read
@@ -14,14 +26,54 @@ permissions:
 jobs:
   post-hours:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Post daily business hours
+      - name: Post PRIME CITY business hours
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
           node <<'NODE'
-          const tz = "Europe/London";
+          const tz = "Africa/Lagos";
           const now = new Date();
+
+          function getParts(date) {
+            return Object.fromEntries(
+              new Intl.DateTimeFormat("en-GB", {
+                timeZone: tz,
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hourCycle: "h23"
+              }).formatToParts(date).map(p => [p.type, p.value])
+            );
+          }
+
+          function localToUTC(y, m, d, h, min = 0) {
+            const desired = Date.UTC(y, m - 1, d, h, min);
+            let guess = desired;
+
+            for (let i = 0; i < 4; i++) {
+              const p = getParts(new Date(guess));
+              const actual = Date.UTC(
+                +p.year, +p.month - 1, +p.day,
+                +p.hour, +p.minute
+              );
+              const correction = desired - actual;
+              guess += correction;
+              if (correction === 0) break;
+            }
+
+            return new Date(guess);
+          }
+
+          const p = getParts(now);
+          const year = +p.year;
+          const month = +p.month;
+          const date = +p.day;
 
           const day = new Intl.DateTimeFormat("en-GB", {
             timeZone: tz,
@@ -29,46 +81,128 @@ jobs:
           }).format(now);
 
           const sunday = day === "Sun";
-          const hour = sunday ? 15 : 18;
+          const openHour = sunday ? 13 : 9;
+          const closeHour = sunday ? 15 : 18;
 
-          const p = Object.fromEntries(
-            new Intl.DateTimeFormat("en-GB", {
-              timeZone: tz,
-              year: "numeric",
-              month: "2-digit",
-              day: "2-digit"
-            }).formatToParts(now).map(x => [x.type, x.value])
+          const opening = localToUTC(
+            year, month, date, openHour
           );
 
-          const target = Date.UTC(+p.year, +p.month - 1, +p.day, hour);
-          let close = new Date(target);
+          const closing = localToUTC(
+            year, month, date, closeHour
+          );
 
-          for (let i = 0; i < 3; i++) {
-            const shown = new Intl.DateTimeFormat("en-GB", {
-              timeZone: tz,
-              year: "numeric", month: "2-digit",
-              day: "2-digit", hour: "2-digit",
-              minute: "2-digit", hourCycle: "h23"
-            }).formatToParts(close);
-            const v = Object.fromEntries(shown.map(x => [x.type, x.value]));
-            const actual = Date.UTC(+v.year, +v.month - 1, +v.day, +v.hour, +v.minute);
-            close = new Date(close.getTime() + target - actual);
+          const openStamp = Math.floor(opening.getTime() / 1000);
+          const closeStamp = Math.floor(closing.getTime() / 1000);
+
+          const schedule = process.env.GITHUB_EVENT_SCHEDULE || "";
+
+          const closingRun =
+            schedule === "0 18 * * 1-6" ||
+            schedule === "0 15 * * 0";
+
+          const isOpen =
+            now >= opening && now < closing;
+
+          let status;
+          let description;
+          let color;
+
+          if (closingRun || (!isOpen && now >= closing)) {
+            status = "🔴 CLOSED";
+            description =
+              "Today's office hours have ended. Thank you for choosing PRIME CITY. We look forward to assisting you again.";
+            color = 0xB22222;
+
+          } else if (isOpen) {
+            status = sunday
+              ? "🟠 EMERGENCY SUPPORT ONLY"
+              : "🟢 OFFICE OPEN";
+
+            description = sunday
+              ? "PRIME CITY is available for emergency property enquiries only today."
+              : "Welcome to PRIME CITY Real Estate. Our agents are available for property enquiries, viewings and purchases.";
+
+            color = sunday ? 0xD4AF37 : 0x228B22;
+
+          } else {
+            status = "🟡 OPENING SOON";
+            description =
+              "Our office is currently closed. We look forward to welcoming you soon.";
+
+            color = 0xD4AF37;
           }
 
-          const stamp = Math.floor(close.getTime() / 1000);
+          const countdown = now < opening
+            ? {
+                name: "⏳ OPENS IN",
+                value: `<t:${openStamp}:R>`,
+                inline: false
+              }
+            : now < closing && !closingRun
+            ? {
+                name: "⏳ TIME UNTIL CLOSING",
+                value: `<t:${closeStamp}:R>`,
+                inline: false
+              }
+            : null;
 
-          const message = sunday
-            ? `# 🏡 PRIME CITY REAL ESTATE\n🟠 **EMERGENCY ONLY**\n\nHours: 1 PM – 3 PM UK time\n\n⏳ Closing in: <t:${stamp}:R>\n🔴 Closing: <t:${stamp}:t>`
-            : `# 🏡 PRIME CITY REAL ESTATE\n🟢 **OPEN**\n\nHours: 9 AM – 6 PM UK time\n\n⏳ Closing in: <t:${stamp}:R>\n🔴 Closing: <t:${stamp}:t>`;
+          const fields = [
+            {
+              name: "📍 OFFICE STATUS",
+              value: status,
+              inline: false
+            },
+            {
+              name: "🌅 OPENING — YOUR LOCAL TIME",
+              value: `<t:${openStamp}:t>`,
+              inline: true
+            },
+            {
+              name: "🌙 CLOSING — YOUR LOCAL TIME",
+              value: `<t:${closeStamp}:t>`,
+              inline: true
+            }
+          ];
+
+          if (countdown) fields.push(countdown);
+
+          const embed = {
+            title: "🏡 PRIME CITY | REAL ESTATE",
+            description:
+              `**YOUR CITY. YOUR HOME. YOUR STORY.**\n\n${description}\n\n` +
+              `**Official schedule:** ${sunday ? "13:00–15:00" : "09:00–18:00"} WAT`,
+            color,
+            fields,
+            footer: {
+              text: "PRIME CITY REAL ESTATE • WAT (Africa/Lagos) • Times automatically localised"
+            },
+            timestamp: now.toISOString()
+          };
 
           fetch(process.env.DISCORD_WEBHOOK_URL, {
             method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({content: message})
-          }).then(r => {
-            if (!r.ok) throw new Error("Discord webhook failed: " + r.status);
-          }).catch(e => {
-            console.error(e);
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              embeds: [embed],
+              allowed_mentions: {
+                parse: []
+              }
+            })
+          })
+          .then(async response => {
+            if (!response.ok) {
+              throw new Error(
+                "Discord webhook failed: " +
+                response.status + " " + await response.text()
+              );
+            }
+            console.log("PRIME CITY announcement posted successfully.");
+          })
+          .catch(error => {
+            console.error(error);
             process.exit(1);
           });
           NODE
