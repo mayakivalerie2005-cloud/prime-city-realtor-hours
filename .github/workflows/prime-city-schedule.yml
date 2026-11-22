@@ -1,11 +1,9 @@
-
 name: PRIME CITY Official Business Schedule
 
 on:
   workflow_dispatch:
 
   schedule:
-    # Refresh daily at 00:05 WAT (23:05 UTC)
     - cron: '5 23 * * *'
 
 permissions:
@@ -31,138 +29,84 @@ jobs:
           const fs = require("fs");
 
           const webhook = process.env.DISCORD_WEBHOOK_URL;
-          const tz = "Africa/Lagos";
           const idFile = ".github/prime-city-schedule-message-id.txt";
-          const now = new Date();
 
           if (!webhook) {
             throw new Error("Discord webhook secret is missing.");
           }
 
-          function getParts(date) {
-            return Object.fromEntries(
-              new Intl.DateTimeFormat("en-GB", {
-                timeZone: tz,
-                year: "numeric",
-                month: "2-digit",
-                day: "2-digit",
-                weekday: "short",
-                hour: "2-digit",
-                minute: "2-digit",
-                hourCycle: "h23"
-              }).formatToParts(date).map(x => [x.type, x.value])
-            );
-          }
-
-          function localToUTC(y, m, d, h, min) {
-            const target = Date.UTC(y, m - 1, d, h, min);
-            let result = new Date(target);
-
-            for (let i = 0; i < 3; i++) {
-              const p = getParts(result);
-              const actual = Date.UTC(
-                Number(p.year),
-                Number(p.month) - 1,
-                Number(p.day),
-                Number(p.hour),
-                Number(p.minute)
-              );
-
-              result = new Date(result.getTime() + target - actual);
-            }
-
-            return result;
-          }
-
-          // Find the next occurrence of a weekly opening or closing.
-          function nextOccurrence(allowedDays, hour) {
-            const p = getParts(now);
-            const y = Number(p.year);
-            const m = Number(p.month);
-            const d = Number(p.day);
-
-            for (let offset = 0; offset <= 7; offset++) {
-              const date = new Date(Date.UTC(y, m - 1, d + offset));
-              const cy = date.getUTCFullYear();
-              const cm = date.getUTCMonth() + 1;
-              const cd = date.getUTCDate();
-
-              const noon = localToUTC(cy, cm, cd, 12, 0);
-              const weekday = getParts(noon).weekday;
-
-              if (!allowedDays.includes(weekday)) continue;
-
-              const candidate = localToUTC(cy, cm, cd, hour, 0);
-
-              if (candidate.getTime() > now.getTime()) {
-                return Math.floor(candidate.getTime() / 1000);
-              }
-            }
-
-            throw new Error("Could not calculate the next schedule time.");
-          }
-
-          const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-          const sunday = ["Sun"];
-
-          const weekdayOpen = nextOccurrence(weekdays, 9);
-          const weekdayClose = nextOccurrence(weekdays, 18);
-          const sundayOpen = nextOccurrence(sunday, 13);
-          const sundayClose = nextOccurrence(sunday, 15);
-
-          const description =
-            "Welcome to PRIME CITY REAL ESTATE!\n\n" +
-            "Our dedicated real estate team is available during the operating hours listed below to assist with property purchases, sales, viewings and enquiries.\n\n" +
-            "━━━━━━━━━━━━━━━━━━━━\n\n" +
-            "### 🗓️ WEEKLY OPERATING HOURS\n\n" +
-            "**MONDAY – SATURDAY**\n" +
-            `🟢 Opening: <t:${weekdayOpen}:t>\n` +
-            `🔴 Closing: <t:${weekdayClose}:t>\n\n` +
-            "**SUNDAY**\n" +
-            "🟠 Emergency Requests Only\n" +
-            `Opening: <t:${sundayOpen}:t>\n` +
-            `Closing: <t:${sundayClose}:t>\n\n` +
-            "━━━━━━━━━━━━━━━━━━━━\n\n" +
-            "### ⏰ BUSINESS STATUS\n\n" +
-            "🟢 **OPEN** — Our real estate agents are available.\n\n" +
-            "🔴 **CLOSED** — Regular property services are unavailable.\n\n" +
-            "🟠 **EMERGENCY ONLY** — Urgent property-related matters may be reviewed, subject to staff availability.\n\n" +
-            "### 🌍 TIMEZONE INFORMATION\n\n" +
-            "All times are based on West Africa Time (WAT). Discord automatically displays timestamps in your local timezone.\n\n" +
-            "You do not need to calculate time differences or convert the schedule yourself!\n\n" +
-            "### 📌 IMPORTANT INFORMATION\n\n" +
-            "• Property enquiries must be submitted through our official ticket system.\n" +
-            "• Requests submitted outside operating hours will be handled when business resumes.\n" +
-            "• Please respect our agents' working hours.\n" +
-            "• Emergency requests are not guaranteed immediate assistance.\n\n" +
-            "━━━━━━━━━━━━━━━━━━━━\n\n" +
-            "**PRIME CITY REAL ESTATE**\n" +
-            "*Where Your Next Chapter Begins.* 👑";
+          const description = [
+            "# 👑 PRIME CITY REAL ESTATE",
+            "### OFFICIAL BUSINESS HOURS 🏡",
+            "",
+            "Welcome to PRIME CITY REAL ESTATE!",
+            "",
+            "Our dedicated real estate team is available during the operating hours listed below to assist with property purchases, sales, viewings and enquiries.",
+            "",
+            "━━━━━━━━━━━━━━━━━━━━",
+            "### 🗓️ WEEKLY OPERATING HOURS",
+            "",
+            "**MONDAY – SATURDAY**",
+            "🟢 Opening: <t:1795424400:t>",
+            "🔴 Closing: <t:1795456800:t>",
+            "",
+            "**SUNDAY**",
+            "🟠 Emergency Requests Only",
+            "Opening: <t:1795525200:t>",
+            "Closing: <t:1795532400:t>",
+            "",
+            "━━━━━━━━━━━━━━━━━━━━",
+            "### ⏰ BUSINESS STATUS",
+            "",
+            "🟢 **OPEN** — Our real estate agents are available.",
+            "",
+            "🔴 **CLOSED** — Regular property services are unavailable.",
+            "",
+            "🟠 **EMERGENCY ONLY** — Urgent property-related matters may be reviewed, subject to staff availability.",
+            "",
+            "### 🌍 TIMEZONE INFORMATION",
+            "",
+            "All times are displayed automatically in your local timezone through Discord.",
+            "You do not need to calculate time differences or convert the schedule yourself!",
+            "",
+            "### 📌 IMPORTANT INFORMATION",
+            "",
+            "• Property enquiries must be submitted through our official ticket system.",
+            "• Requests submitted outside operating hours will be handled when business resumes.",
+            "• Please respect our agents' working hours.",
+            "• Emergency requests are not guaranteed immediate assistance.",
+            "",
+            "━━━━━━━━━━━━━━━━━━━━",
+            "**PRIME CITY REAL ESTATE**",
+            "*Where Your Next Chapter Begins.* 👑"
+          ].join("\n");
 
           const embed = {
-            title: "👑 PRIME CITY REAL ESTATE",
-            description,
+            description: description,
             color: 0xB22222,
             footer: {
-              text: "PRIME CITY REAL ESTATE • OFFICIAL BUSINESS HOURS • WAT"
-            },
-            timestamp: now.toISOString()
+              text: "PRIME CITY REAL ESTATE • OFFICIAL BUSINESS HOURS"
+            }
           };
 
           async function createMessage() {
             const response = await fetch(`${webhook}?wait=true`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json"
+              },
               body: JSON.stringify({
                 embeds: [embed],
-                allowed_mentions: { parse: [] }
+                allowed_mentions: {
+                  parse: []
+                }
               })
             });
 
             if (!response.ok) {
               throw new Error(
-                "Discord creation failed: " + response.status +
-                " " + await response.text()
+                "Discord creation failed: " +
+                response.status + " " + await response.text()
               );
             }
 
@@ -172,10 +116,14 @@ jobs:
           async function editMessage(id) {
             return await fetch(`${webhook}/messages/${id}`, {
               method: "PATCH",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json"
+              },
               body: JSON.stringify({
                 embeds: [embed],
-                allowed_mentions: { parse: [] }
+                allowed_mentions: {
+                  parse: []
+                }
               })
             });
           }
@@ -199,12 +147,12 @@ jobs:
 
               if (response.status !== 404) {
                 throw new Error(
-                  "Discord edit failed: " + response.status +
-                  " " + await response.text()
+                  "Discord edit failed: " +
+                  response.status + " " + await response.text()
                 );
               }
 
-              console.log("Old schedule message not found. Creating a replacement.");
+              console.log("Previous message not found. Creating replacement.");
             }
 
             const message = await createMessage();
@@ -214,7 +162,8 @@ jobs:
             }
 
             fs.writeFileSync(idFile, message.id + "\n");
-            console.log("Official schedule created successfully.");
+
+            console.log("Official business schedule created.");
           }
 
           main().catch(error => {
@@ -231,8 +180,8 @@ jobs:
           git add .github/prime-city-schedule-message-id.txt
 
           if ! git diff --cached --quiet; then
-            git commit -m "Save PRIME CITY official schedule message ID"
+            git commit -m "Save PRIME CITY schedule message ID"
             git push
           else
-            echo "Schedule message ID is already saved."
+            echo "Schedule message ID already saved."
           fi
