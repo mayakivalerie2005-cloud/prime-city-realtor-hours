@@ -148,28 +148,6 @@ def get_next_update(now):
     return int(next_update.timestamp())
 
 # ==========================================
-# COUNTDOWN: DAYS, HOURS AND MINUTES
-# ==========================================
-
-def format_countdown(next_update):
-
-    now_timestamp = int(
-        datetime.now(timezone.utc).timestamp()
-    )
-
-    remaining = max(0, next_update - now_timestamp)
-
-    days = remaining // 86400
-    hours = (remaining % 86400) // 3600
-    minutes = (remaining % 3600) // 60
-
-    return (
-        f"**{days} days, "
-        f"{hours} hours, "
-        f"{minutes} minutes remaining**"
-    )
-
-# ==========================================
 # PRICE FORMATTING
 # ==========================================
 
@@ -318,8 +296,6 @@ def create_embed(state, next_update):
 
     timestamp = state["updated_at"]
 
-    countdown = format_countdown(next_update)
-
     description = (
         "## OFFICIAL PROPERTY MARKET\n"
         "🟢 **WEEKLY MARKET REPORT**\n\n"
@@ -334,8 +310,8 @@ def create_embed(state, next_update):
         "━━━━━━━━━━━━━━━━━━━━\n"
         "⏰ **NEXT MARKET UPDATE**\n"
         f"📅 **Date & Time:** <t:{next_update}:F>\n"
-        f"🕒 **Countdown:** {countdown}\n"
-        "*Date and time displayed in your local timezone.*\n"
+        f"🕒 **Live Countdown:** <t:{next_update}:R>\n"
+        "*Date and time automatically displayed in your local timezone.*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
 
         "🏠 **PROPERTY PRICING NOTICE**\n"
