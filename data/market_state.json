@@ -13,11 +13,11 @@
   "last_update_week": "2026-W48",
   "previous_prices": {
     "District 1": 2010000,
-    "District 2": 2980000,
-    "District 3": 3990000,
-    "District 4": 4940000,
+    "District 2": 3000000,
+    "District 3": 4000000,
+    "District 4": 5000000,
     "District 5": 6550000,
-    "District 6": 7980000
+    "District 6": 8000000
   },
   "changes": {
     "District 1": {
@@ -26,19 +26,19 @@
       "difference": 180000
     },
     "District 2": {
-      "previous": 2980000,
+      "previous": 3000000,
       "current": 3000000,
-      "difference": 20000
+      "difference": 0
     },
     "District 3": {
-      "previous": 3990000,
+      "previous": 4000000,
       "current": 4030000,
-      "difference": 40000
+      "difference": 30000
     },
     "District 4": {
-      "previous": 4940000,
+      "previous": 5000000,
       "current": 5000000,
-      "difference": 60000
+      "difference": 0
     },
     "District 5": {
       "previous": 6550000,
@@ -46,9 +46,9 @@
       "difference": 0
     },
     "District 6": {
-      "previous": 7980000,
+      "previous": 8000000,
       "current": 8000000,
-      "difference": 20000
+      "difference": 0
     }
   }
 }
