@@ -20,6 +20,10 @@ WEBHOOK = os.environ["PROPERTY_MARKET_DISCORD_WEBHOOK_URL"]
 
 IMAGE_NAME = "prime-city-district-map.png"
 
+# ==========================================
+# OFFICIAL BASE PRICES
+# ==========================================
+
 BASE_PRICES = {
     "District 1": 2_000_000,
     "District 2": 3_000_000,
@@ -34,17 +38,21 @@ MAX_WEEKLY_MOVEMENT = 200_000
 STEP = 10_000
 
 # Weekly probability:
-# 42.5% increase, 42.5% decrease, 15% unchanged.
+# 42.5% increase
+# 42.5% decrease
+# 15% unchanged
 
 # ==========================================
 # MARKET STATE
 # ==========================================
 
 def load_state():
+
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     if STATE_FILE.exists():
-        state = json.loads(STATE_FILE.read_text())
+        with STATE_FILE.open("r", encoding="utf-8") as file:
+            state = json.load(file)
     else:
         state = {}
 
@@ -58,33 +66,100 @@ def load_state():
     return state
 
 def save_state(state):
-    STATE_FILE.write_text(
-        json.dumps(state, indent=2) + "\n"
-    )
+
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    with STATE_FILE.open("w", encoding="utf-8") as file:
+        json.dump(state, file, indent=2)
+
+        file.write("\n")
 
 # ==========================================
-# RANDOM WEEKLY PRICE MOVEMENT
+# PRICE PROTECTION
 # ==========================================
 
 def round_price(value):
+
     return int(round(value / STEP) * STEP)
+
+def protect_price(district, value):
+
+    base = BASE_PRICES[district]
+
+    maximum = base + MAX_INCREASE
+
+    value = round_price(value)
+
+    return max(base, min(value, maximum))
+
+def repair_prices(prices):
+
+    repaired = {}
+
+    for district, base in BASE_PRICES.items():
+
+        saved_price = prices.get(district, base)
+
+        repaired[district] = protect_price(
+            district,
+            saved_price
+        )
+
+    return repaired
+
+# ==========================================
+# RANDOM WEEKLY MARKET MOVEMENT
+# ==========================================
 
 def update_prices(state, week_key):
 
-    # Prevent multiple changes during the same week.
+    # Repair all saved prices before doing anything.
+    current_prices = repair_prices(
+        state.get("prices", {})
+    )
+
+    previous_prices = repair_prices(
+        state.get("previous_prices", current_prices)
+    )
+
+    state["prices"] = current_prices
+    state["previous_prices"] = previous_prices
+
+    # Prevent multiple adjustments in one week.
     if state.get("last_update_week") == week_key:
+
+        changes = {}
+
+        for district in BASE_PRICES:
+
+            previous = previous_prices[district]
+            current = current_prices[district]
+
+            changes[district] = {
+                "previous": previous,
+                "current": current,
+                "difference": current - previous
+            }
+
+        state["changes"] = changes
+
+        if not state.get("updated_at"):
+            state["updated_at"] = int(
+                datetime.now(timezone.utc).timestamp()
+            )
+
         return
 
-    current_prices = state["prices"].copy()
+    # Begin a new weekly market cycle.
     previous_prices = current_prices.copy()
+
     new_prices = {}
     changes = {}
 
     for district, base in BASE_PRICES.items():
 
-        old_price = current_prices.get(district, base)
+        old_price = current_prices[district]
 
-        # Random market direction.
         direction = random.choices(
             ["up", "down", "same"],
             weights=[42.5, 42.5, 15],
@@ -92,9 +167,11 @@ def update_prices(state, week_key):
         )[0]
 
         if direction == "same":
+
             new_price = old_price
 
         else:
+
             amount = random.randrange(
                 STEP,
                 MAX_WEEKLY_MOVEMENT + STEP,
@@ -103,21 +180,16 @@ def update_prices(state, week_key):
 
             if direction == "up":
                 new_price = old_price + amount
+
             else:
                 new_price = old_price - amount
 
-        # Permanent minimum and maximum limits.
-        minimum = base
-        maximum = base + MAX_INCREASE
-
-        new_price = max(
-            minimum,
-            min(new_price, maximum)
+        # Enforce permanent district limits.
+        new_price = protect_price(
+            district,
+            new_price
         )
 
-        new_price = round_price(new_price)
-
-        # Save movement.
         difference = new_price - old_price
 
         new_prices[district] = new_price
@@ -131,7 +203,9 @@ def update_prices(state, week_key):
     state["previous_prices"] = previous_prices
     state["prices"] = new_prices
     state["changes"] = changes
+
     state["last_update_week"] = week_key
+
     state["updated_at"] = int(
         datetime.now(timezone.utc).timestamp()
     )
@@ -141,17 +215,28 @@ def update_prices(state, week_key):
 # ==========================================
 
 def format_price(value):
+
     return f"${value:,.0f}"
 
 def format_change(difference):
 
     if difference > 0:
-        return f"🟢 ↑ +{format_price(difference)}"
 
-    if difference < 0:
-        return f"🔴 ↓ -{format_price(abs(difference))}"
+        return (
+            f"🟢 ↑ +{format_price(difference)}"
+        )
+
+    elif difference < 0:
+
+        return (
+            f"🔴 ↓ -{format_price(abs(difference))}"
+        )
 
     return "⚪ → NO CHANGE"
+
+# ==========================================
+# WEEKLY MARKET REPORT
+# ==========================================
 
 def create_price_report(state):
 
@@ -159,7 +244,10 @@ def create_price_report(state):
 
     for district in BASE_PRICES:
 
-        movement = state["changes"].get(district, {})
+        movement = state["changes"].get(
+            district,
+            {}
+        )
 
         previous = movement.get(
             "previous",
@@ -170,11 +258,13 @@ def create_price_report(state):
 
         difference = current - previous
 
+        indicator = format_change(difference)
+
         lines.append(
-            f"**{district}**\n"
+            f"**{district}** — "
             f"`{format_price(previous)}` → "
-            f"`{format_price(current)}`\n"
-            f"{format_change(difference)}"
+            f"`{format_price(current)}` "
+            f"{indicator}"
         )
 
     return "\n".join(lines)
@@ -198,7 +288,8 @@ def create_embed(state):
         "━━━━━━━━━━━━━━━━━━━━\n"
         "🏠 **PROPERTY PRICING NOTICE**\n"
         "Final property prices are subject to interior choice. "
-        "Different interior selections may affect the final purchase price.\n"
+        "Different interior selections may affect the final "
+        "purchase price.\n"
         "📊 Prices fluctuate weekly according to market conditions."
     )
 
@@ -222,6 +313,7 @@ def create_embed(state):
 def send_or_edit(state):
 
     if not IMAGE_FILE.exists():
+
         raise FileNotFoundError(
             f"District map missing: {IMAGE_FILE}"
         )
@@ -239,6 +331,7 @@ def send_or_edit(state):
 
     message_id = state.get("message_id")
 
+    # Edit the existing market announcement.
     if message_id:
 
         url = f"{WEBHOOK}/messages/{message_id}"
@@ -261,12 +354,15 @@ def send_or_edit(state):
             )
 
         if response.status_code != 404:
+
             response.raise_for_status()
+
             return
 
+        # Existing message no longer exists.
         state["message_id"] = None
 
-    # Create a new post if no existing message is available.
+    # Create a new announcement if necessary.
     with IMAGE_FILE.open("rb") as image:
 
         response = requests.post(
@@ -285,10 +381,11 @@ def send_or_edit(state):
         )
 
     response.raise_for_status()
+
     state["message_id"] = response.json()["id"]
 
 # ==========================================
-# MAIN
+# MAIN AUTOMATION
 # ==========================================
 
 def main():
@@ -305,15 +402,28 @@ def main():
 
     save_state(state)
 
-    print("================================")
-    print("PRIME CITY WEEKLY MARKET")
-    print("MARKET UPDATE SUCCESSFUL")
-    print("================================")
+    print("======================================")
+    print("       PRIME CITY PROPERTY MARKET")
+    print("======================================")
 
-    for district, price in state["prices"].items():
-        print(f"{district}: {format_price(price)}")
+    for district, base in BASE_PRICES.items():
 
+        price = state["prices"][district]
+
+        minimum = base
+        maximum = base + MAX_INCREASE
+
+        assert minimum <= price <= maximum
+
+        print(
+            f"{district}: {format_price(price)}"
+        )
+
+    print("--------------------------------------")
+    print("ALL DISTRICT PRICE LIMITS VERIFIED")
+    print("WEEKLY MARKET UPDATE SUCCESSFUL")
     print("Message ID:", state["message_id"])
+    print("======================================")
 
 if __name__ == "__main__":
     main()
