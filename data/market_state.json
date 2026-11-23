@@ -1,8 +1,17 @@
 {
   "message_id": "1574334664955400233",
   "last_update_hour": "2026-11-23-08",
-  "updated_at": 1795421839,
+  "updated_at": 1795422725,
   "prices": {
+    "District 1": 2160000,
+    "District 2": 3070000,
+    "District 3": 4100000,
+    "District 4": 5000000,
+    "District 5": 6510000,
+    "District 6": 8000000
+  },
+  "last_update_week": "2026-11-23T08:00:00",
+  "previous_prices": {
     "District 1": 2190000,
     "District 2": 3000000,
     "District 3": 4030000,
@@ -10,30 +19,21 @@
     "District 5": 6550000,
     "District 6": 8000000
   },
-  "last_update_week": "2026-W48",
-  "previous_prices": {
-    "District 1": 2010000,
-    "District 2": 3000000,
-    "District 3": 4000000,
-    "District 4": 5000000,
-    "District 5": 6550000,
-    "District 6": 8000000
-  },
   "changes": {
     "District 1": {
-      "previous": 2010000,
-      "current": 2190000,
-      "difference": 180000
+      "previous": 2190000,
+      "current": 2160000,
+      "difference": -30000
     },
     "District 2": {
       "previous": 3000000,
-      "current": 3000000,
-      "difference": 0
+      "current": 3070000,
+      "difference": 70000
     },
     "District 3": {
-      "previous": 4000000,
-      "current": 4030000,
-      "difference": 30000
+      "previous": 4030000,
+      "current": 4100000,
+      "difference": 70000
     },
     "District 4": {
       "previous": 5000000,
@@ -42,8 +42,8 @@
     },
     "District 5": {
       "previous": 6550000,
-      "current": 6550000,
-      "difference": 0
+      "current": 6510000,
+      "difference": -40000
     },
     "District 6": {
       "previous": 8000000,
