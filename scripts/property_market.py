@@ -42,8 +42,7 @@ STEP = 10_000
 # 42.5% decrease
 # 15% unchanged
 
-# Official market update:
-# Every Monday at 08:00 UTC.
+# Official update: Every Monday at 08:00 UTC.
 
 # ==========================================
 # STATE MANAGEMENT
@@ -95,12 +94,8 @@ def repair_prices(prices):
     repaired = {}
 
     for district, base in BASE_PRICES.items():
-
         saved = prices.get(district, base)
-
-        repaired[district] = protect_price(
-            district, saved
-        )
+        repaired[district] = protect_price(district, saved)
 
     return repaired
 
@@ -110,7 +105,6 @@ def repair_prices(prices):
 
 def get_market_week_key(now):
 
-    # Market week begins Monday at 08:00 UTC.
     monday = now - timedelta(days=now.weekday())
 
     week_start = monday.replace(
@@ -120,8 +114,6 @@ def get_market_week_key(now):
         microsecond=0
     )
 
-    # Before Monday 08:00, the previous
-    # market week is still active.
     if now < week_start:
         week_start -= timedelta(days=7)
 
@@ -217,11 +209,9 @@ def update_prices(state, week_key, now):
         )[0]
 
         if direction == "same":
-
             new_price = old_price
 
         else:
-
             amount = random.randrange(
                 STEP,
                 MAX_WEEKLY_MOVEMENT + STEP,
@@ -233,10 +223,7 @@ def update_prices(state, week_key, now):
             else:
                 new_price = old_price - amount
 
-        new_price = protect_price(
-            district,
-            new_price
-        )
+        new_price = protect_price(district, new_price)
 
         difference = new_price - old_price
 
@@ -264,9 +251,7 @@ def create_price_report(state):
 
     for district in BASE_PRICES:
 
-        movement = state["changes"].get(
-            district, {}
-        )
+        movement = state["changes"].get(district, {})
 
         previous = movement.get(
             "previous",
@@ -277,19 +262,17 @@ def create_price_report(state):
 
         difference = current - previous
 
-        indicator = format_change(difference)
-
         lines.append(
             f"**{district}** — "
             f"`{format_price(previous)}` → "
             f"`{format_price(current)}` "
-            f"{indicator}"
+            f"{format_change(difference)}"
         )
 
     return "\n".join(lines)
 
 # ==========================================
-# DISCORD EMBED
+# DISCORD EMBED - COMPACT DESIGN
 # ==========================================
 
 def create_embed(state, next_update):
@@ -298,28 +281,20 @@ def create_embed(state, next_update):
 
     description = (
         "## OFFICIAL PROPERTY MARKET\n"
-        "🟢 **WEEKLY MARKET REPORT**\n\n"
-
-        "### MARKET DATE & TIME\n"
-        f"<t:{timestamp}:F>\n"
-        "*Displayed in each viewer's local time.*\n\n"
-
+        "🟢 **WEEKLY MARKET REPORT**\n"
+        f"🕒 Updated: <t:{timestamp}:F>\n"
+        "*Times shown in your local timezone.*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
         "### DISTRICT PURCHASE PRICES\n"
-        f"{create_price_report(state)}\n\n"
-
+        f"{create_price_report(state)}\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "⏰ **NEXT MARKET UPDATE**\n"
-        f"📅 **Date & Time:** <t:{next_update}:F>\n"
-        f"🕒 **Live Countdown:** <t:{next_update}:R>\n"
-        "*Date and time automatically displayed in your local timezone.*\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-
+        f"📅 <t:{next_update}:F>\n"
+        f"🕒 <t:{next_update}:R>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
         "🏠 **PROPERTY PRICING NOTICE**\n"
         "Final property prices are subject to interior choice. "
-        "Different interior selections may affect the final "
-        "purchase price.\n\n"
-
-        "📊 Prices fluctuate weekly according to market conditions."
+        "Different interior selections may affect the final purchase price."
     )
 
     return {
@@ -361,7 +336,7 @@ def send_or_edit(state, next_update):
 
     message_id = state.get("message_id")
 
-    # Edit the existing Discord announcement.
+    # Edit existing Discord announcement.
     if message_id:
 
         url = f"{WEBHOOK}/messages/{message_id}"
@@ -387,11 +362,10 @@ def send_or_edit(state, next_update):
             response.raise_for_status()
             return
 
-        # Create a replacement if the old
-        # Discord message no longer exists.
+        # Recreate if the old message no longer exists.
         state["message_id"] = None
 
-    # Create the announcement if necessary.
+    # Create a new announcement if necessary.
     with IMAGE_FILE.open("rb") as image:
 
         response = requests.post(
@@ -441,14 +415,9 @@ def main():
 
         price = state["prices"][district]
 
-        minimum = base
-        maximum = base + MAX_INCREASE
+        assert base <= price <= base + MAX_INCREASE
 
-        assert minimum <= price <= maximum
-
-        print(
-            f"{district}: {format_price(price)}"
-        )
+        print(f"{district}: {format_price(price)}")
 
     print("--------------------------------------")
     print("ALL PRICE LIMITS VERIFIED")
