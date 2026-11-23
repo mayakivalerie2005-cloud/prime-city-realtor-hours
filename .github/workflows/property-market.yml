@@ -44,3 +44,4 @@ jobs:
           git diff --cached --quiet || git commit -m "Update PRIME CITY weekly market"
           git push
 
+
