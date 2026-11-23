@@ -3,7 +3,7 @@ name: PRIME CITY - Weekly Payday Countdown
 
 on:
   schedule:
-    # Update every 5 minutes
+    # Run every 5 minutes
     - cron: '*/5 * * * *'
 
   workflow_dispatch:
@@ -26,9 +26,10 @@ jobs:
         with:
           persist-credentials: true
 
-      - name: Update permanent payday announcement
+      - name: Update payday announcement
         env:
           WEBHOOK_URL: ${{ secrets.PAYROLL_DISCORD_WEBHOOK_URL }}
+
         run: |
           node <<'NODE'
           const https = require('https');
@@ -104,7 +105,8 @@ jobs:
 
             date.setUTCDate(date.getUTCDate() + days);
 
-            // 8 PM WAT = 19:00 UTC
+            // Official payday: Sunday, 8 PM Nigeria time.
+            // Nigeria time is UTC+1.
             let target = Date.UTC(
               date.getUTCFullYear(),
               date.getUTCMonth(),
@@ -112,7 +114,7 @@ jobs:
               19, 0, 0
             );
 
-            // Move to next Sunday if payday has passed.
+            // If today's payday has passed, use next Sunday.
             if (target <= now.getTime()) {
               target += 7 * 86400000;
             }
@@ -120,26 +122,8 @@ jobs:
             return Math.floor(target / 1000);
           }
 
-          function formatCountdown(payment) {
-            const remaining = Math.max(
-              0,
-              Math.ceil((payment * 1000 - Date.now()) / 60000)
-            );
-
-            const days = Math.floor(remaining / 1440);
-            const hours = Math.floor((remaining % 1440) / 60);
-            const minutes = remaining % 60;
-
-            return [
-              `${String(days).padStart(2, '0')} Days`,
-              `${String(hours).padStart(2, '0')} Hours`,
-              `${String(minutes).padStart(2, '0')} Minutes`
-            ].join(' • ');
-          }
-
           async function main() {
             const payment = getNextSunday();
-            const countdown = formatCountdown(payment);
 
             const portal =
               'https://mayakivalerie2005-cloud.github.io/prime-city-realtor-hours/prime-city-agent-payroll/';
@@ -151,28 +135,26 @@ jobs:
                 title: '👑 PRIME CITY REAL ESTATE',
 
                 description:
-                  '**WEEKLY AGENT PAYROLL**\n\n' +
+                  '**WEEKLY AGENT PAYROLL**\n' +
                   '━━━━━━━━━━━━━━━━━━━━\n\n' +
 
-                  'Your weekly commission payment is scheduled ' +
-                  'according to the official PRIME CITY payroll calendar.\n\n' +
+                  'Your weekly commission payment is scheduled according to the official PRIME CITY payroll calendar.\n\n' +
 
                   '**💰 PAYMENT SCHEDULE**\n' +
                   'Payment frequency: Every Sunday\n' +
-                  'Payment time: 8:00 PM WAT\n\n' +
+                  'Official payment time: 8:00 PM WAT\n\n' +
 
                   '**📅 NEXT PAYDAY**\n' +
                   `<t:${payment}:D>\n` +
-                  `🕗 <t:${payment}:t>\n\n` +
+                  `🕗 <t:${payment}:t> (your local time)\n\n` +
 
                   '**⏳ COUNTDOWN TO PAYMENT**\n' +
-                  `${countdown}\n\n` +
+                  `<t:${payment}:R>\n\n` +
 
                   '━━━━━━━━━━━━━━━━━━━━\n\n' +
 
                   '**📂 AGENT PAYROLL PORTAL**\n' +
-                  'Access your payroll information and payment records below.\n\n' +
-
+                  'Access your payroll information and payment records below.\n' +
                   `🔗 [OPEN PAYROLL PORTAL](${portal})`,
 
                 color: 14269269,
@@ -194,7 +176,7 @@ jobs:
             let result;
 
             if (messageId) {
-              console.log('Updating existing payroll announcement...');
+              console.log('Updating existing announcement...');
 
               const editUrl = new URL(base.toString());
 
@@ -213,13 +195,13 @@ jobs:
                   throw error;
                 }
 
-                console.log('Old message not found. Creating a new one.');
+                console.log('Old announcement not found. Creating a new one.');
                 messageId = '';
               }
             }
 
             if (!messageId) {
-              console.log('Creating permanent payroll announcement...');
+              console.log('Creating first announcement...');
 
               const postUrl = new URL(base.toString());
               postUrl.searchParams.set('wait', 'true');
@@ -238,10 +220,10 @@ jobs:
 
               fs.writeFileSync(idFile, result.id + '\n');
 
-              console.log('New message ID saved:', result.id);
+              console.log('Announcement ID saved:', result.id);
             }
 
-            console.log('PRIME CITY payroll announcement updated.');
+            console.log('PRIME CITY payday announcement updated successfully.');
           }
 
           main().catch(error => {
@@ -250,15 +232,14 @@ jobs:
           });
           NODE
 
-      - name: Save permanent announcement ID
+      - name: Save announcement ID
         run: |
           if [[ -n "$(git status --porcelain -- state/payday-message-id.txt)" ]]; then
             git config user.name "PRIME CITY Payroll Bot"
             git config user.email "payroll-bot@users.noreply.github.com"
 
             git add state/payday-message-id.txt
-
             git commit -m "Save PRIME CITY payroll announcement ID"
-
             git push
           fi
+
