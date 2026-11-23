@@ -33,9 +33,113 @@ function rankOptions(selected){return RANKS.map(r=>`<option value="${r}" ${r===s
 function showMessage(id,msg,bad=false){$(id).textContent=msg;$(id).className='message'+(bad?' error':'')}
 function tab(name){document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));['overview','sales','agents','payroll'].forEach(t=>$('tab-'+t).classList.toggle('hidden',t!==name))}
 document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>tab(b.dataset.tab)));
-async function load(){if(!db)return;const {data:profile,error:pe}=await db.from('profiles').select('role,agent_id').eq('user_id',(await db.auth.getUser()).data.user.id).single();if(pe)throw new Error('Your account has no access profile. Ask the administrator to finish setting up your account.');myProfile=profile;
-if(profile.role==='admin'){const [a,s,p,loginProfiles]=await Promise.all([db.from('agents').select('*').order('name'),db.from('sales').select('*,agents(name)').order('sold_at',{ascending:false}),db.from('payroll_runs').select('*').order('week_start',{ascending:false}),db.from('profiles').select('agent_id,login_email').not('agent_id','is',null)]);if(a.error||s.error||p.error||loginProfiles.error)throw(a.error||s.error||p.error||loginProfiles.error);const emailByAgent=new Map((loginProfiles.data||[]).map(x=>[x.agent_id,x.login_email]));agents=a.data.map(agent=>({...agent,login_email:emailByAgent.get(agent.id)||''}));sales=s.data;payroll=p.data; $('adminTabs').classList.remove('hidden');document.querySelectorAll('[data-tab]').forEach(b=>b.classList.remove('hidden'));$('agentWelcome').classList.add('hidden');render();}
-else {const [a,s,p]=await Promise.all([db.from('agents').select('*').eq('id',profile.agent_id).single(),db.from('sales').select('*').eq('agent_id',profile.agent_id).order('sold_at',{ascending:false}),db.from('payroll_agent_rows').select('*').eq('agent_id',profile.agent_id).order('week_start',{ascending:false})]);if(a.error||s.error||p.error)throw(a.error||s.error||p.error);if(a.data.deleted_at){await db.auth.signOut();throw new Error('This agent account has been archived. Contact the administrator.');}agents=[a.data];sales=s.data;payroll=p.data;$('adminTabs').classList.add('hidden');document.querySelectorAll('[data-tab]').forEach(b=>b.classList.add('hidden'));['overview','sales','agents','payroll'].forEach(t=>$('tab-'+t).classList.add('hidden'));$('agentWelcome').classList.remove('hidden');renderAgent();}}
+async function load(){
+  if(!db) return;
+
+  // Get the currently authenticated user first.
+  const { data: authData, error: authError } = await db.auth.getUser();
+  const user = authData?.user;
+
+  if(authError || !user){
+    throw new Error(
+      'Authentication error: ' + (authError?.message || 'No authenticated user found.')
+    );
+  }
+
+  // Look up this exact user's access profile.
+  const { data: profile, error: profileError } = await db
+    .from('profiles')
+    .select('role,agent_id')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if(profileError){
+    console.error('Profile lookup failed:', {
+      message: profileError.message,
+      code: profileError.code,
+      details: profileError.details,
+      hint: profileError.hint,
+      userId: user.id
+    });
+
+    throw new Error(
+      'Profile database error: ' + profileError.message +
+      (profileError.code ? ' (code: ' + profileError.code + ')' : '')
+    );
+  }
+
+  if(!profile){
+    console.error('No profile row found for authenticated user:', user.id);
+    throw new Error(
+      'No access profile exists for this signed-in user. User ID: ' + user.id
+    );
+  }
+
+  if(profile.role !== 'admin' && profile.role !== 'agent'){
+    throw new Error('Your account has an invalid access role: ' + String(profile.role));
+  }
+
+  if(profile.role === 'agent' && !profile.agent_id){
+    throw new Error('Your agent profile is missing its agent record link. Contact the administrator.');
+  }
+
+  myProfile = profile;
+
+  if(profile.role === 'admin'){
+    const [a,s,p,loginProfiles] = await Promise.all([
+      db.from('agents').select('*').order('name'),
+      db.from('sales').select('*,agents(name)').order('sold_at',{ascending:false}),
+      db.from('payroll_runs').select('*').order('week_start',{ascending:false}),
+      db.from('profiles').select('agent_id,login_email').not('agent_id','is',null)
+    ]);
+
+    if(a.error || s.error || p.error || loginProfiles.error){
+      throw(a.error || s.error || p.error || loginProfiles.error);
+    }
+
+    const emailByAgent = new Map(
+      (loginProfiles.data || []).map(x => [x.agent_id, x.login_email])
+    );
+
+    agents = a.data.map(agent => ({
+      ...agent,
+      login_email: emailByAgent.get(agent.id) || ''
+    }));
+
+    sales = s.data;
+    payroll = p.data;
+
+    $('adminTabs').classList.remove('hidden');
+    document.querySelectorAll('[data-tab]').forEach(b => b.classList.remove('hidden'));
+    $('agentWelcome').classList.add('hidden');
+    render();
+  } else {
+    const [a,s,p] = await Promise.all([
+      db.from('agents').select('*').eq('id',profile.agent_id).single(),
+      db.from('sales').select('*').eq('agent_id',profile.agent_id).order('sold_at',{ascending:false}),
+      db.from('payroll_agent_rows').select('*').eq('agent_id',profile.agent_id).order('week_start',{ascending:false})
+    ]);
+
+    if(a.error || s.error || p.error){
+      throw(a.error || s.error || p.error);
+    }
+
+    if(a.data.deleted_at){
+      await db.auth.signOut();
+      throw new Error('This agent account has been archived. Contact the administrator.');
+    }
+
+    agents = [a.data];
+    sales = s.data;
+    payroll = p.data;
+
+    $('adminTabs').classList.add('hidden');
+    document.querySelectorAll('[data-tab]').forEach(b => b.classList.add('hidden'));
+    ['overview','sales','agents','payroll'].forEach(t => $('tab-'+t).classList.add('hidden'));
+    $('agentWelcome').classList.remove('hidden');
+    renderAgent();
+  }
+}
 function renderAgent(){const w=weekBounds(),week=sales.filter(s=>s.status==='sold'&&inWeek(s.sold_at)),v=week.reduce((n,s)=>n+Number(s.amount),0);$('agentSummary').innerHTML=`<div class="grid"><div class="stat"><label>PROPERTIES SOLD THIS WEEK</label><strong>${week.length}</strong></div><div class="stat"><label>WEEKLY SALES VALUE</label><strong>${money(v)}</strong></div><div class="stat"><label>5% COMMISSION</label><strong class="commission">${money(v*RATE)}</strong></div><div class="stat"><label>COMMISSION RATE</label><strong>5%</strong></div></div><p class="sub">Current week: ${w.start} to ${w.end} · WAT</p>`;$('agentSales').innerHTML=sales.length?table(['Date sold','Property','Sale amount','Status'],sales.map(s=>[s.sold_at,esc(s.property_ref),money(s.amount),`<span class="pill ${s.status==='pending'?'pending':''}">${s.status.toUpperCase()}</span>`])):'<div class="empty">No sales have been recorded for you yet.</div>';$('agentPayroll').innerHTML=payroll.length?table(['Week','Properties sold','Sales total','Commission'],payroll.map(p=>[`${p.week_start} – ${p.week_end}`,p.properties_sold,money(p.sales_total),`<span class="commission">${money(p.commission_total)}</span>`])):'<div class="empty">Your archived weekly payroll will appear here after the Sunday report.</div>';}
 
 function render(){const w=weekBounds(),week=sales.filter(s=>s.status==='sold'&&inWeek(s.sold_at)),value=week.reduce((n,s)=>n+Number(s.amount),0);$('weekLabel').textContent=`${w.start} to ${w.end} · Africa/Lagos`; $('kpiCount').textContent=week.length;$('kpiValue').textContent=money(value);$('kpiCommission').textContent=money(value*RATE);$('kpiAgents').textContent=agents.filter(a=>a.active).length;
