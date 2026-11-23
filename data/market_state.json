@@ -1,13 +1,54 @@
 {
   "message_id": "1574334664955400233",
   "last_update_hour": "2026-11-23-08",
-  "updated_at": 1795421033,
+  "updated_at": 1795421839,
   "prices": {
+    "District 1": 2190000,
+    "District 2": 3000000,
+    "District 3": 4030000,
+    "District 4": 5000000,
+    "District 5": 6550000,
+    "District 6": 8000000
+  },
+  "last_update_week": "2026-W48",
+  "previous_prices": {
     "District 1": 2010000,
     "District 2": 2980000,
     "District 3": 3990000,
     "District 4": 4940000,
     "District 5": 6550000,
     "District 6": 7980000
+  },
+  "changes": {
+    "District 1": {
+      "previous": 2010000,
+      "current": 2190000,
+      "difference": 180000
+    },
+    "District 2": {
+      "previous": 2980000,
+      "current": 3000000,
+      "difference": 20000
+    },
+    "District 3": {
+      "previous": 3990000,
+      "current": 4030000,
+      "difference": 40000
+    },
+    "District 4": {
+      "previous": 4940000,
+      "current": 5000000,
+      "difference": 60000
+    },
+    "District 5": {
+      "previous": 6550000,
+      "current": 6550000,
+      "difference": 0
+    },
+    "District 6": {
+      "previous": 7980000,
+      "current": 8000000,
+      "difference": 20000
+    }
   }
 }
