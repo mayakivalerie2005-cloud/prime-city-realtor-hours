@@ -1,14 +1,13 @@
-
 {
-  "message_id": null,
-  "last_update_hour": null,
-  "updated_at": null,
+  "message_id": "1574334664955400233",
+  "last_update_hour": "2026-11-23-08",
+  "updated_at": 1795421033,
   "prices": {
-    "District 1": 2000000,
-    "District 2": 3000000,
-    "District 3": 4000000,
-    "District 4": 5000000,
-    "District 5": 6500000,
-    "District 6": 8000000
+    "District 1": 2010000,
+    "District 2": 2980000,
+    "District 3": 3990000,
+    "District 4": 4940000,
+    "District 5": 6550000,
+    "District 6": 7980000
   }
 }
