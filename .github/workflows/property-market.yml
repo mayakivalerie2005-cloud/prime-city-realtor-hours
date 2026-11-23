@@ -1,9 +1,9 @@
 
-name: PRIME CITY - Live Property Market
+name: PRIME CITY - Weekly Property Market
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 8 * * 1'
 
   workflow_dispatch:
 
@@ -30,15 +30,16 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Update PRIME CITY property market
+      - name: Update PRIME CITY weekly market
         env:
           PROPERTY_MARKET_DISCORD_WEBHOOK_URL: ${{ secrets.PROPERTY_MARKET_DISCORD_WEBHOOK_URL }}
         run: python scripts/property_market.py
 
-      - name: Save updated market state
+      - name: Save weekly market state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/market_state.json
-          git diff --cached --quiet || git commit -m "Update property market prices"
+          git diff --cached --quiet || git commit -m "Update PRIME CITY weekly market"
           git push
+
