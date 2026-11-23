@@ -3,7 +3,7 @@ import os
 import json
 import random
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import requests
 
@@ -37,13 +37,16 @@ MAX_INCREASE = 1_000_000
 MAX_WEEKLY_MOVEMENT = 200_000
 STEP = 10_000
 
-# Weekly probability:
+# Weekly movement probabilities:
 # 42.5% increase
 # 42.5% decrease
 # 15% unchanged
 
+# Official market update:
+# Every Monday at 08:00 UTC.
+
 # ==========================================
-# MARKET STATE
+# STATE MANAGEMENT
 # ==========================================
 
 def load_state():
@@ -67,11 +70,8 @@ def load_state():
 
 def save_state(state):
 
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-
     with STATE_FILE.open("w", encoding="utf-8") as file:
         json.dump(state, file, indent=2)
-
         file.write("\n")
 
 # ==========================================
@@ -79,13 +79,11 @@ def save_state(state):
 # ==========================================
 
 def round_price(value):
-
     return int(round(value / STEP) * STEP)
 
 def protect_price(district, value):
 
     base = BASE_PRICES[district]
-
     maximum = base + MAX_INCREASE
 
     value = round_price(value)
@@ -98,22 +96,102 @@ def repair_prices(prices):
 
     for district, base in BASE_PRICES.items():
 
-        saved_price = prices.get(district, base)
+        saved = prices.get(district, base)
 
         repaired[district] = protect_price(
-            district,
-            saved_price
+            district, saved
         )
 
     return repaired
 
 # ==========================================
-# RANDOM WEEKLY MARKET MOVEMENT
+# MARKET WEEK CALCULATION
 # ==========================================
 
-def update_prices(state, week_key):
+def get_market_week_key(now):
 
-    # Repair all saved prices before doing anything.
+    # Market week begins Monday at 08:00 UTC.
+    monday = now - timedelta(days=now.weekday())
+
+    week_start = monday.replace(
+        hour=8,
+        minute=0,
+        second=0,
+        microsecond=0
+    )
+
+    # Before Monday 08:00, the previous
+    # market week is still active.
+    if now < week_start:
+        week_start -= timedelta(days=7)
+
+    return week_start.strftime("%Y-%m-%dT%H:%M:%S")
+
+# ==========================================
+# NEXT MARKET UPDATE
+# ==========================================
+
+def get_next_update(now):
+
+    days_until_monday = (7 - now.weekday()) % 7
+
+    next_update = now.replace(
+        hour=8,
+        minute=0,
+        second=0,
+        microsecond=0
+    ) + timedelta(days=days_until_monday)
+
+    if next_update <= now:
+        next_update += timedelta(days=7)
+
+    return int(next_update.timestamp())
+
+# ==========================================
+# COUNTDOWN: DAYS, HOURS AND MINUTES
+# ==========================================
+
+def format_countdown(next_update):
+
+    now_timestamp = int(
+        datetime.now(timezone.utc).timestamp()
+    )
+
+    remaining = max(0, next_update - now_timestamp)
+
+    days = remaining // 86400
+    hours = (remaining % 86400) // 3600
+    minutes = (remaining % 3600) // 60
+
+    return (
+        f"**{days} days, "
+        f"{hours} hours, "
+        f"{minutes} minutes remaining**"
+    )
+
+# ==========================================
+# PRICE FORMATTING
+# ==========================================
+
+def format_price(value):
+    return f"${value:,.0f}"
+
+def format_change(difference):
+
+    if difference > 0:
+        return f"🟢 ↑ +{format_price(difference)}"
+
+    if difference < 0:
+        return f"🔴 ↓ -{format_price(abs(difference))}"
+
+    return "⚪ → NO CHANGE"
+
+# ==========================================
+# RANDOM WEEKLY PRICE MOVEMENTS
+# ==========================================
+
+def update_prices(state, week_key, now):
+
     current_prices = repair_prices(
         state.get("prices", {})
     )
@@ -125,38 +203,32 @@ def update_prices(state, week_key):
     state["prices"] = current_prices
     state["previous_prices"] = previous_prices
 
-    # Prevent multiple adjustments in one week.
+    # Prevent multiple price changes in one market week.
     if state.get("last_update_week") == week_key:
 
-        changes = {}
-
-        for district in BASE_PRICES:
-
-            previous = previous_prices[district]
-            current = current_prices[district]
-
-            changes[district] = {
-                "previous": previous,
-                "current": current,
-                "difference": current - previous
+        state["changes"] = {
+            district: {
+                "previous": previous_prices[district],
+                "current": current_prices[district],
+                "difference": (
+                    current_prices[district]
+                    - previous_prices[district]
+                )
             }
-
-        state["changes"] = changes
+            for district in BASE_PRICES
+        }
 
         if not state.get("updated_at"):
-            state["updated_at"] = int(
-                datetime.now(timezone.utc).timestamp()
-            )
+            state["updated_at"] = int(now.timestamp())
 
         return
 
-    # Begin a new weekly market cycle.
     previous_prices = current_prices.copy()
 
     new_prices = {}
     changes = {}
 
-    for district, base in BASE_PRICES.items():
+    for district in BASE_PRICES:
 
         old_price = current_prices[district]
 
@@ -180,11 +252,9 @@ def update_prices(state, week_key):
 
             if direction == "up":
                 new_price = old_price + amount
-
             else:
                 new_price = old_price - amount
 
-        # Enforce permanent district limits.
         new_price = protect_price(
             district,
             new_price
@@ -203,36 +273,8 @@ def update_prices(state, week_key):
     state["previous_prices"] = previous_prices
     state["prices"] = new_prices
     state["changes"] = changes
-
     state["last_update_week"] = week_key
-
-    state["updated_at"] = int(
-        datetime.now(timezone.utc).timestamp()
-    )
-
-# ==========================================
-# PRICE DISPLAY
-# ==========================================
-
-def format_price(value):
-
-    return f"${value:,.0f}"
-
-def format_change(difference):
-
-    if difference > 0:
-
-        return (
-            f"🟢 ↑ +{format_price(difference)}"
-        )
-
-    elif difference < 0:
-
-        return (
-            f"🔴 ↓ -{format_price(abs(difference))}"
-        )
-
-    return "⚪ → NO CHANGE"
+    state["updated_at"] = int(now.timestamp())
 
 # ==========================================
 # WEEKLY MARKET REPORT
@@ -245,8 +287,7 @@ def create_price_report(state):
     for district in BASE_PRICES:
 
         movement = state["changes"].get(
-            district,
-            {}
+            district, {}
         )
 
         previous = movement.get(
@@ -273,23 +314,35 @@ def create_price_report(state):
 # DISCORD EMBED
 # ==========================================
 
-def create_embed(state):
+def create_embed(state, next_update):
 
     timestamp = state["updated_at"]
 
+    countdown = format_countdown(next_update)
+
     description = (
         "## OFFICIAL PROPERTY MARKET\n"
-        "🟢 **WEEKLY MARKET REPORT**\n"
+        "🟢 **WEEKLY MARKET REPORT**\n\n"
+
         "### MARKET DATE & TIME\n"
         f"<t:{timestamp}:F>\n"
-        "*Displayed in each viewer's local time.*\n"
+        "*Displayed in each viewer's local time.*\n\n"
+
         "### DISTRICT PURCHASE PRICES\n"
-        f"{create_price_report(state)}\n"
+        f"{create_price_report(state)}\n\n"
+
         "━━━━━━━━━━━━━━━━━━━━\n"
+        "⏰ **NEXT MARKET UPDATE**\n"
+        f"📅 **Date & Time:** <t:{next_update}:F>\n"
+        f"🕒 **Countdown:** {countdown}\n"
+        "*Date and time displayed in your local timezone.*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+
         "🏠 **PROPERTY PRICING NOTICE**\n"
         "Final property prices are subject to interior choice. "
         "Different interior selections may affect the final "
-        "purchase price.\n"
+        "purchase price.\n\n"
+
         "📊 Prices fluctuate weekly according to market conditions."
     )
 
@@ -310,17 +363,18 @@ def create_embed(state):
 # DISCORD WEBHOOK
 # ==========================================
 
-def send_or_edit(state):
+def send_or_edit(state, next_update):
 
     if not IMAGE_FILE.exists():
-
         raise FileNotFoundError(
             f"District map missing: {IMAGE_FILE}"
         )
 
     payload = {
         "username": "PRIME CITY | PROPERTY MARKET",
-        "embeds": [create_embed(state)],
+        "embeds": [
+            create_embed(state, next_update)
+        ],
         "attachments": [
             {
                 "id": 0,
@@ -331,7 +385,7 @@ def send_or_edit(state):
 
     message_id = state.get("message_id")
 
-    # Edit the existing market announcement.
+    # Edit the existing Discord announcement.
     if message_id:
 
         url = f"{WEBHOOK}/messages/{message_id}"
@@ -354,15 +408,14 @@ def send_or_edit(state):
             )
 
         if response.status_code != 404:
-
             response.raise_for_status()
-
             return
 
-        # Existing message no longer exists.
+        # Create a replacement if the old
+        # Discord message no longer exists.
         state["message_id"] = None
 
-    # Create a new announcement if necessary.
+    # Create the announcement if necessary.
     with IMAGE_FILE.open("rb") as image:
 
         response = requests.post(
@@ -394,11 +447,13 @@ def main():
 
     now = datetime.now(timezone.utc)
 
-    week_key = now.strftime("%G-W%V")
+    week_key = get_market_week_key(now)
 
-    update_prices(state, week_key)
+    next_update = get_next_update(now)
 
-    send_or_edit(state)
+    update_prices(state, week_key, now)
+
+    send_or_edit(state, next_update)
 
     save_state(state)
 
@@ -420,9 +475,10 @@ def main():
         )
 
     print("--------------------------------------")
-    print("ALL DISTRICT PRICE LIMITS VERIFIED")
+    print("ALL PRICE LIMITS VERIFIED")
     print("WEEKLY MARKET UPDATE SUCCESSFUL")
-    print("Message ID:", state["message_id"])
+    print("NEXT UPDATE:", next_update)
+    print("MESSAGE ID:", state["message_id"])
     print("======================================")
 
 if __name__ == "__main__":
