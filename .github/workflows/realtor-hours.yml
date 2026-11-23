@@ -5,9 +5,7 @@ on:
   workflow_dispatch:
 
   schedule:
-    # Check business status every 5 minutes, Lagos time
     - cron: '*/5 * * * *'
-      timezone: Africa/Lagos
 
 permissions:
   contents: write
@@ -113,13 +111,21 @@ jobs:
             year: "numeric"
           }).format(now).toUpperCase();
 
+          // Today's opening and closing timestamps.
+          // Discord converts these automatically for each viewer.
+          const openStamp = Math.floor(
+            localToUTC(
+              year, month, day, openingHour, 0
+            ).getTime() / 1000
+          );
+
           const closeStamp = Math.floor(
             localToUTC(
               year, month, day, closingHour, 0
             ).getTime() / 1000
           );
 
-          // Find the next opening time when closed.
+          // Calculate the next opening when the office is closed.
           let nextOpenStamp = null;
 
           if (!isOpen) {
@@ -172,6 +178,10 @@ jobs:
             colour = 0xB22222;
           }
 
+          const todayHours = isSunday
+            ? `🟠 **Emergency Only**\nOpening: <t:${openStamp}:t>\nClosing: <t:${closeStamp}:t>`
+            : `Opening: <t:${openStamp}:t>\nClosing: <t:${closeStamp}:t>`;
+
           const fields = [
             {
               name: "📅 DAY",
@@ -190,9 +200,7 @@ jobs:
             },
             {
               name: "🕒 TODAY'S HOURS",
-              value: isSunday
-                ? "1:00 PM – 3:00 PM WAT\n**Emergency Only**"
-                : "9:00 AM – 6:00 PM WAT",
+              value: todayHours,
               inline: false
             }
           ];
@@ -200,7 +208,7 @@ jobs:
           if (isOpen) {
             fields.push({
               name: "⏳ TIME UNTIL CLOSING",
-              value: `<t:${closeStamp}:R>\nClosing at <t:${closeStamp}:t>`,
+              value: `<t:${closeStamp}:R>`,
               inline: false
             });
           } else if (nextOpenStamp) {
@@ -214,7 +222,7 @@ jobs:
           const embed = {
             title: `👑 PRIME CITY REAL ESTATE | ${dayLabel}`,
             description:
-              "🏡 **LIVE BUSINESS HOURS UPDATE**\n\n" +
+              "🏡 **LIVE BUSINESS STATUS**\n\n" +
               "Your PRIME CITY real estate team is here to assist with property purchases, sales, viewings and enquiries.",
             color: colour,
             fields,
@@ -307,7 +315,7 @@ jobs:
           });
           NODE
 
-      - name: Save new announcement ID
+      - name: Save announcement ID
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -320,3 +328,4 @@ jobs:
           else
             echo "Message ID already saved."
           fi
+
